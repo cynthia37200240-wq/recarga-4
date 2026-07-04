@@ -373,7 +373,7 @@ app.post('/api/pix', async (req, res) => {
     const txId = String(dados.id);
     salvarPedidoUtmifyLocal(txId, {
       createdAt: toUtmifyDate(new Date()),
-      customer: { name: 'Cliente', email, phone: '+55' + telefone, document: cpf, country: 'BR', ip },
+      customer: { name: 'Recarga Online', email, phone: '+55' + telefone, document: cnpj, country: 'BR', ip },
       products: [{ id: operadora.toLowerCase(), name: `Recarga ${operadora}`, planId: null, planName: null, quantity: 1, priceInCents: valor * 100 }],
       trackingParameters: extrairTrackingParams(tracking),
       commission: { totalPriceInCents: valor * 100, gatewayFeeInCents: 0, userCommissionInCents: valor * 100, currency: 'BRL' },
