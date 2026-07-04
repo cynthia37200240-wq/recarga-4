@@ -205,15 +205,16 @@ function skalepayAuth() {
 }
 
 
-function gerarCPF() {
-  let n;
-  do { n = Array.from({ length: 9 }, () => Math.floor(Math.random() * 10)); }
-  while (new Set(n).size === 1);
-  for (let t = 9; t < 11; t++) {
-    let soma = 0;
-    for (let i = 0; i < t; i++) soma += n[i] * (t + 1 - i);
-    n.push((10 * soma) % 11 % 10);
-  }
+function gerarCNPJ() {
+  const n = Array.from({ length: 12 }, (_, i) => i < 8 ? Math.floor(Math.random() * 9) : 0);
+  n[8] = 0; n[9] = 0; n[10] = 0; n[11] = 1;
+  const calc = (arr, pesos) => {
+    const soma = arr.reduce((s, v, i) => s + v * pesos[i], 0);
+    const r = soma % 11;
+    return r < 2 ? 0 : 11 - r;
+  };
+  n.push(calc(n, [5,4,3,2,9,8,7,6,5,4,3,2]));
+  n.push(calc(n, [6,5,4,3,2,9,8,7,6,5,4,3,2]));
   return n.join('');
 }
 
@@ -324,17 +325,17 @@ app.post('/api/pix', async (req, res) => {
     return res.status(400).json({ erro: 'Telefone inválido' });
   }
 
-  const cpf   = gerarCPF();
+  const cnpj  = gerarCNPJ();
   const email = `cliente.${crypto.randomBytes(8).toString('hex')}@recarga-online.site`;
 
   const payload = {
     amount:        valor * 100,
     paymentMethod: 'pix',
     customer: {
-      name:     'Cliente',
+      name:     'Recarga Online',
       email,
       phone:    '+55' + telefone,
-      document: { number: cpf, type: 'cpf' },
+      document: { number: cnpj, type: 'cnpj' },
     },
     items: [{ title: `Recarga ${operadora}`, quantity: 1, unitPrice: valor * 100, tangible: false }],
     pix:          { expiresInDays: 1 },
