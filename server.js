@@ -304,16 +304,8 @@ async function enviarUtmify(txId, statusSkalepay) {
 }
 
 // ============================================================
-// CONSULTA DE OPERADORA — via Telein
+// CONSULTA DE OPERADORA — via consultaoperadora.com.br (Telein)
 // ============================================================
-const OPERADORA_KEYWORDS = [
-  { key: 'vivo',     nome: 'Vivo'     },
-  { key: 'tim',      nome: 'TIM'      },
-  { key: 'claro',    nome: 'Claro'    },
-  { key: 'algar',    nome: 'Algar'    },
-  { key: 'correios', nome: 'Correios' },
-];
-
 app.get('/api/operadora', async (req, res) => {
   const numero = String(req.query.numero || '').replace(/\D/g, '');
   if (numero.length < 10 || numero.length > 11) {
@@ -321,20 +313,35 @@ app.get('/api/operadora', async (req, res) => {
   }
   try {
     const ctrl = new AbortController();
-    const tid  = setTimeout(() => ctrl.abort(), 8000);
-    const r = await fetch(`https://www.consultanumero.telein.com.br/portabilidade/${numero}`, {
+    const tid  = setTimeout(() => ctrl.abort(), 10000);
+    const r = await fetch('https://consultaoperadora.com.br/site2015/resposta.php', {
+      method: 'POST',
       headers: {
         'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         'Accept':          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'pt-BR,pt;q=0.9',
-        'Referer':         'https://www.consultanumero.telein.com.br/',
+        'Content-Type':    'application/x-www-form-urlencoded',
+        'Referer':         'https://consultaoperadora.com.br/',
+        'Origin':          'https://consultaoperadora.com.br',
       },
+      body: `numero=${encodeURIComponent(numero)}&tipo=consulta&delay=ok`,
       signal: ctrl.signal,
     });
     clearTimeout(tid);
-    const html = (await r.text()).toLowerCase();
-    const found = OPERADORA_KEYWORDS.find(o => html.includes(o.key));
-    return res.json({ operadora: found ? found.nome : null });
+    const html = await r.text();
+
+    // The result page contains: <span class="azul lead">Operadora:</span><span class="lead laranja"> CARRIER NAME </span>
+    const match = html.match(/Operadora:<\/span><span[^>]+>\s*([^<]+)/i);
+    if (!match) return res.json({ operadora: null });
+
+    const nome = match[1].toLowerCase().trim();
+    if (nome.includes('telef') || nome.includes('vivo')) return res.json({ operadora: 'Vivo' });
+    if (nome.includes('tim'))                             return res.json({ operadora: 'TIM' });
+    if (nome.includes('claro'))                           return res.json({ operadora: 'Claro' });
+    if (nome.includes('algar'))                           return res.json({ operadora: 'Algar' });
+    if (nome.includes('correios'))                        return res.json({ operadora: 'Correios' });
+
+    return res.json({ operadora: null });
   } catch (e) {
     return res.json({ operadora: null });
   }
