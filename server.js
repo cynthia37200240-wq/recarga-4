@@ -12,12 +12,7 @@ const PORT = process.env.PORT || 3000;
 // ============================================================
 // CONFIG
 // ============================================================
-const SKALEPAY_SECRET_KEY  = (process.env.SKALEPAY_SECRET_KEY || '').trim();
-if (!SKALEPAY_SECRET_KEY) {
-  console.error('FATAL: variável SKALEPAY_SECRET_KEY não definida.');
-  process.exit(1);
-}
-console.log('[config] SKALEPAY_SECRET_KEY carregada:', SKALEPAY_SECRET_KEY.slice(0,8) + '...' + SKALEPAY_SECRET_KEY.slice(-4));
+const SKALEPAY_SECRET_KEY  = 'sk_live_v2WU4wzzlT8TPOs4YqccBW8SUYwWQXgGA1DHIdHALb';
 
 const SKALEPAY_BASE_URL    = 'https://api.conta.skalepay.com.br/v1';
 const VALORES_PERMITIDOS   = new Set([15,17,18,20,25,30,35,40,45,50,55,60,100,200]);
