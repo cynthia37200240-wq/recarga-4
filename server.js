@@ -18,7 +18,7 @@ if (!SKALEPAY_SECRET_KEY) {
   process.exit(1);
 }
 
-const SKALEPAY_BASE_URL    = 'https://api.conta.skalepay.com.br/v1';
+const SKALEPAY_BASE_URL    = 'https://api.skalepayments.com.br';
 const VALORES_PERMITIDOS   = new Set([15,17,18,20,25,30,35,40,45,50,55,60,100,200]);
 const OPERADORAS_PERMITIDAS = new Set(['Vivo','Claro','TIM','Algar','Correios']);
 
@@ -198,8 +198,8 @@ function getClientIp(req) {
   return ((req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0]).trim();
 }
 
-function skalepayAuth() {
-  return 'Basic ' + Buffer.from(SKALEPAY_SECRET_KEY + ':x').toString('base64');
+function skalepayHeaders() {
+  return { 'X-API-Key': SKALEPAY_SECRET_KEY, 'Content-Type': 'application/json', 'Accept': 'application/json' };
 }
 
 
@@ -259,6 +259,7 @@ const UTMIFY_STATUS_MAP = {
   refunded:        'refunded',
   chargedback:     'chargedback',
   canceled:        'refused',
+  cancelled:       'refused',
 };
 
 // Envia/atualiza o pedido na UTMify. Nunca lança erro nem atrasa o fluxo principal de pagamento —
@@ -418,7 +419,7 @@ app.post('/api/pix', async (req, res) => {
     const tid  = setTimeout(() => ctrl.abort(), 30000);
     const apiRes = await fetch(`${SKALEPAY_BASE_URL}/transactions`, {
       method:  'POST',
-      headers: { 'Authorization': skalepayAuth(), 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      headers: skalepayHeaders(),
       body:    JSON.stringify(payload),
       signal:  ctrl.signal,
     });
@@ -479,7 +480,7 @@ app.get('/api/status', async (req, res) => {
     const ctrl = new AbortController();
     const tid  = setTimeout(() => ctrl.abort(), 15000);
     const apiRes = await fetch(`${SKALEPAY_BASE_URL}/transactions/${transacaoId}`, {
-      headers: { 'Authorization': skalepayAuth(), 'Accept': 'application/json' },
+      headers: skalepayHeaders(),
       signal:  ctrl.signal,
     });
     clearTimeout(tid);
@@ -490,7 +491,7 @@ app.get('/api/status', async (req, res) => {
     const dados = await apiRes.json();
     const STATUS_MAP = {
       paid: 'pago', waiting_payment: 'aguardando', pending: 'aguardando',
-      refused: 'recusado', refunded: 'estornado', chargedback: 'estornado', canceled: 'cancelado',
+      refused: 'recusado', refunded: 'estornado', chargedback: 'estornado', canceled: 'cancelado', cancelled: 'cancelado',
     };
     const status = STATUS_MAP[dados.status] || 'aguardando';
 
@@ -531,7 +532,7 @@ async function confirmarStatusNaOrigem(txId) {
     const ctrl = new AbortController();
     const tid  = setTimeout(() => ctrl.abort(), 15000);
     const apiRes = await fetch(`${SKALEPAY_BASE_URL}/transactions/${txId}`, {
-      headers: { 'Authorization': skalepayAuth(), 'Accept': 'application/json' },
+      headers: skalepayHeaders(),
       signal:  ctrl.signal,
     });
     clearTimeout(tid);
@@ -540,7 +541,7 @@ async function confirmarStatusNaOrigem(txId) {
     const dados = await apiRes.json();
     const STATUS_MAP = {
       paid: 'pago', waiting_payment: 'aguardando', pending: 'aguardando',
-      refused: 'recusado', refunded: 'estornado', chargedback: 'estornado', canceled: 'cancelado',
+      refused: 'recusado', refunded: 'estornado', chargedback: 'estornado', canceled: 'cancelado', cancelled: 'cancelado',
     };
     const status = STATUS_MAP[dados.status] || 'aguardando';
 
