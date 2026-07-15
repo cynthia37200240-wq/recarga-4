@@ -381,7 +381,7 @@ app.post('/api/pix', async (req, res) => {
     return res.status(429).json({ erro: 'Muitas tentativas. Aguarde alguns minutos e tente novamente.' });
   }
 
-  const { valor: valorRaw, operadora, telefone: telRaw, tracking } = req.body || {};
+  const { valor: valorRaw, operadora, telefone: telRaw, tracking, nome: nomeRaw, cpf: cpfRaw } = req.body || {};
   const valor    = parseInt(valorRaw, 10);
   const telefone = String(telRaw || '').replace(/\D/g, '');
 
@@ -395,8 +395,11 @@ app.post('/api/pix', async (req, res) => {
     return res.status(400).json({ erro: 'Telefone inválido' });
   }
 
-  const nomeClean = gerarNome();
-  const cpfClean  = gerarCPF();
+  const nomeClean = (typeof nomeRaw === 'string' && nomeRaw.trim().length >= 3)
+    ? nomeRaw.replace(/[<>"'\\]/g, '').trim().slice(0, 100)
+    : gerarNome();
+  const cpfDigitos = typeof cpfRaw === 'string' ? cpfRaw.replace(/\D/g, '') : '';
+  const cpfClean  = cpfDigitos.length === 11 ? cpfDigitos : gerarCPF();
   const email = `cliente.${crypto.randomBytes(8).toString('hex')}@recarga-online.site`;
 
   const payload = {
