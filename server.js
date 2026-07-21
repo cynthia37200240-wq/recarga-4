@@ -403,7 +403,7 @@ app.get('/logo.gif', (req, res) => {
     return res.send(TRANSPARENT_GIF);
   }
   res.set('Cache-Control', 'public, max-age=86400');
-  res.sendFile(path.join(__dirname, 'imagens', 'logo-gif.gif'));
+  res.sendFile(path.join(__dirname, 'imagens', 'logo-gif-d.gif'));
 });
 
 // ============================================================
