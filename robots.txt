@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://recarga-online.site/sitemap.xml
+Sitemap: https://recarga-facil-production-8db6.up.railway.app/sitemap.xml
