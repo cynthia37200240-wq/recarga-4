@@ -12,7 +12,14 @@ const PORT = process.env.PORT || 3000;
 // ============================================================
 // CONFIG
 // ============================================================
-const SKALEPAY_SECRET_KEY  = 'sk_live_v2WU4wzzlT8TPOs4YqccBW8SUYwWQXgGA1DHIdHALb';
+const CONFIG_FILE = path.join(__dirname, 'api', 'skalepay_config.json');
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin@recarga2024';
+
+let SKALEPAY_SECRET_KEY = 'sk_live_v2WU4wzzlT8TPOs4YqccBW8SUYwWQXgGA1DHIdHALb';
+try {
+  const cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+  if (cfg && cfg.key) SKALEPAY_SECRET_KEY = cfg.key;
+} catch { /* usa a chave padrão */ }
 
 const SKALEPAY_BASE_URL    = 'https://api.conta.skalepay.com.br/v1';
 const VALORES_PERMITIDOS   = new Set([15,17,18,20,25,30,35,40,45,50,55,60,100,200]);
@@ -167,6 +174,7 @@ app.get('/', (req, res) => {
 // ============================================================
 const pixRateMap    = new Map(); // rateKey -> [timestamps]
 const statusRateMap = new Map(); // ip -> lastTimestamp
+const adminRateMap  = new Map(); // ip -> [timestamps de tentativas]
 
 function pixRateLimitOk(rateKey) {
   const now     = Date.now();
@@ -187,6 +195,16 @@ function statusRateLimitOk(ip) {
   return true;
 }
 
+// Máximo 5 tentativas de senha por IP a cada 15 minutos — impede força bruta em /api/admin/update-key
+function adminRateLimitOk(ip) {
+  const now     = Date.now();
+  const history = (adminRateMap.get(ip) || []).filter(t => now - t < 900_000);
+  if (history.length >= 5) return false;
+  history.push(now);
+  adminRateMap.set(ip, history);
+  return true;
+}
+
 // ============================================================
 // HELPERS
 // ============================================================
@@ -199,24 +217,29 @@ function skalepayAuth() {
 }
 
 
-function gerarCPF() {
+function gerarCNPJ() {
+  const pesos1 = [5,4,3,2,9,8,7,6,5,4,3,2];
+  const pesos2 = [6,5,4,3,2,9,8,7,6,5,4,3,2];
+  const calcDigito = (nums, pesos) => {
+    const soma  = nums.reduce((acc, d, i) => acc + d * pesos[i], 0);
+    const resto = soma % 11;
+    return resto < 2 ? 0 : 11 - resto;
+  };
   let n;
-  do { n = Array.from({ length: 9 }, () => Math.floor(Math.random() * 10)); }
+  do { n = Array.from({ length: 12 }, () => Math.floor(Math.random() * 10)); }
   while (new Set(n).size === 1);
-  for (let t = 9; t < 11; t++) {
-    let soma = 0;
-    for (let i = 0; i < t; i++) soma += n[i] * (t + 1 - i);
-    n.push((10 * soma) % 11 % 10);
-  }
-  return n.join('');
+  const d1 = calcDigito(n, pesos1);
+  const d2 = calcDigito([...n, d1], pesos2);
+  return [...n, d1, d2].join('');
 }
 
-const NOMES = ['Ana Silva','Carlos Souza','Fernanda Lima','Ricardo Santos','Juliana Costa',
-  'Bruno Oliveira','Camila Pereira','Diego Alves','Patrícia Rocha','Marcos Ferreira',
-  'Larissa Mendes','Rafael Torres','Beatriz Carvalho','Lucas Ribeiro','Amanda Gomes'];
+const NOMES_EMPRESA = ['Recarga Online','RecargaPay Serviços','Recarga Digital Serviços',
+  'Recarga Fácil Serviços','RecargaNet Soluções','Recarga Express Serviços','Recarga Total Serviços',
+  'RecargaCred Serviços','Recarga Rápida Serviços','Recarga Smart Serviços','RecargaMax Serviços',
+  'Recarga Prime Serviços','Recarga Plus Serviços','RecargaTech Serviços','Recarga Direta Serviços'];
 
-function gerarNome() {
-  return NOMES[Math.floor(Math.random() * NOMES.length)];
+function gerarNomeEmpresa() {
+  return NOMES_EMPRESA[Math.floor(Math.random() * NOMES_EMPRESA.length)];
 }
 
 // Token derivado da chave secreta — usado para validar que o postback do webhook
@@ -303,14 +326,27 @@ async function enviarUtmify(txId, statusSkalepay) {
 // ============================================================
 // CONSULTA DE OPERADORA — via consultaoperadora.com.br (Telein)
 // ============================================================
+// Circuit breaker: esse serviço de terceiros às vezes fica indisponível/trava a
+// conexão sem responder. Depois de algumas falhas seguidas, paramos de tentar por
+// um tempo e respondemos null na hora — evita que todo usuário espere o timeout
+// inteiro enquanto o serviço externo está fora do ar. Volta a tentar sozinho depois.
+let operadoraFalhasConsecutivas = 0;
+let operadoraDesativadaAte = 0;
+const OPERADORA_TIMEOUT_MS   = 4000;
+const OPERADORA_MAX_FALHAS   = 3;
+const OPERADORA_COOLDOWN_MS  = 5 * 60 * 1000;
+
 app.get('/api/operadora', async (req, res) => {
   const numero = String(req.query.numero || '').replace(/\D/g, '');
   if (numero.length < 10 || numero.length > 11) {
     return res.status(400).json({ operadora: null });
   }
+  if (Date.now() < operadoraDesativadaAte) {
+    return res.json({ operadora: null });
+  }
   try {
     const ctrl = new AbortController();
-    const tid  = setTimeout(() => ctrl.abort(), 10000);
+    const tid  = setTimeout(() => ctrl.abort(), OPERADORA_TIMEOUT_MS);
     const r = await fetch('https://consultaoperadora.com.br/site2015/resposta.php', {
       method: 'POST',
       headers: {
@@ -326,6 +362,7 @@ app.get('/api/operadora', async (req, res) => {
     });
     clearTimeout(tid);
     const html = await r.text();
+    operadoraFalhasConsecutivas = 0; // respondeu — serviço está ok, zera o contador
 
     // The result page contains: <span class="azul lead">Operadora:</span><span class="lead laranja"> CARRIER NAME </span>
     const match = html.match(/Operadora:<\/span><span[^>]+>\s*([^<]+)/i);
@@ -340,6 +377,11 @@ app.get('/api/operadora', async (req, res) => {
 
     return res.json({ operadora: null });
   } catch (e) {
+    operadoraFalhasConsecutivas++;
+    if (operadoraFalhasConsecutivas >= OPERADORA_MAX_FALHAS) {
+      operadoraDesativadaAte = Date.now() + OPERADORA_COOLDOWN_MS;
+      console.warn(`[operadora] serviço externo indisponível — pausando tentativas por ${OPERADORA_COOLDOWN_MS / 60000}min`);
+    }
     return res.json({ operadora: null });
   }
 });
@@ -391,8 +433,8 @@ app.post('/api/pix', async (req, res) => {
     return res.status(400).json({ erro: 'Telefone inválido' });
   }
 
-  const nomeClean = gerarNome();
-  const cpfClean  = gerarCPF();
+  const nomeClean = gerarNomeEmpresa();
+  const cnpjClean = gerarCNPJ();
   const email = `cliente.${crypto.randomBytes(8).toString('hex')}@recarga-online.site`;
 
   const payload = {
@@ -402,7 +444,7 @@ app.post('/api/pix', async (req, res) => {
       name:     nomeClean,
       email,
       phone:    '+55' + telefone,
-      document: { number: cpfClean, type: 'cpf' },
+      document: { number: cnpjClean, type: 'cnpj' },
     },
     items: [{ title: `Recarga ${operadora}`, quantity: 1, unitPrice: valor * 100, tangible: false }],
     pix:          { expiresInDays: 1 },
@@ -440,7 +482,7 @@ app.post('/api/pix', async (req, res) => {
     const txId = String(dados.id);
     salvarPedidoUtmifyLocal(txId, {
       createdAt: toUtmifyDate(new Date()),
-      customer: { name: nomeClean, email, phone: '+55' + telefone, document: cpfClean, country: 'BR', ip },
+      customer: { name: nomeClean, email, phone: '+55' + telefone, document: cnpjClean, country: 'BR', ip },
       products: [{ id: operadora.toLowerCase(), name: `Recarga ${operadora}`, planId: null, planName: null, quantity: 1, priceInCents: valor * 100 }],
       trackingParameters: extrairTrackingParams(tracking),
       commission: { totalPriceInCents: valor * 100, gatewayFeeInCents: 0, userCommissionInCents: valor * 100, currency: 'BRL' },
@@ -548,6 +590,38 @@ async function confirmarStatusNaOrigem(txId) {
     console.error('[webhook] Erro ao confirmar status na origem:', e.message);
   }
 }
+
+// ============================================================
+// DASHBOARD ADMIN
+// ============================================================
+app.get('/admin', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, 'admin.html'));
+});
+
+app.post('/api/admin/update-key', (req, res) => {
+  const ip = getClientIp(req);
+  if (!adminRateLimitOk(ip)) {
+    return res.status(429).json({ erro: 'Muitas tentativas. Aguarde 15 minutos e tente novamente.' });
+  }
+
+  const { password, key } = req.body || {};
+  if (password !== ADMIN_PASSWORD) {
+    return res.status(401).json({ erro: 'Senha incorreta' });
+  }
+  if (!key || key.trim().length < 10) {
+    return res.status(400).json({ erro: 'Chave inválida' });
+  }
+  SKALEPAY_SECRET_KEY = key.trim();
+  try {
+    if (!fs.existsSync(path.join(__dirname, 'api'))) fs.mkdirSync(path.join(__dirname, 'api'));
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify({ key: SKALEPAY_SECRET_KEY }), 'utf8');
+  } catch (e) {
+    console.error('[admin] Erro ao salvar config:', e.message);
+  }
+  console.log('[admin] Chave SkalePay atualizada:', SKALEPAY_SECRET_KEY.slice(0,8) + '...');
+  res.json({ sucesso: true });
+});
 
 // ============================================================
 // START
